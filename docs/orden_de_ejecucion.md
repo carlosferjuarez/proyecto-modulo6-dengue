@@ -1,4 +1,4 @@
-# SonidoMX... no — Proyecto de Vigilancia Epidemiológica de Dengue (MongoDB)
+# Proyecto de Vigilancia Epidemiológica de Dengue (MongoDB)
 ## M6-NOSQL · Orden de ejecución
 
 Este documento permite reproducir el proyecto completo desde un estado
