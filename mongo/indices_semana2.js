@@ -1,35 +1,64 @@
 /**
  * ============================================================
- * Semana 2, §3.4 — Diseño de índices (regla ESR: Equality, Sort, Range)
+ * Semana 2, §3.2 — Patrones de consulta seleccionados
  * ============================================================
  *
- * Índice 1 — idx_semana_casos  (apoya Consulta A)
+ * Consulta A — "Top municipios por semana"
+ *   Pregunta: ¿qué municipios muestran mayor incidencia de casos
+ *             confirmados en una semana epidemiológica dada?
+ *   Campos de igualdad: semana_epidemiologica.anio, semana_epidemiologica.semana
+ *   Ordenamiento: casos_confirmados descendente
+ *   ¿Consulta arreglo?: no
+ *   Frecuencia esperada: alta — vista principal para brigadas de
+ *                         control, se ejecuta cada semana epidemiológica.
+ *
+ * Consulta B — "Serie temporal de un municipio"
+ *   Pregunta: ¿cómo ha evolucionado la incidencia semanal de un
+ *             municipio a lo largo de un rango de semanas/años?
+ *   Campos de igualdad: clave_municipio
+ *   Campos de rango: semana_epidemiologica.anio
+ *   Ordenamiento: fecha_inicio_semana ascendente
+ *   ¿Consulta arreglo?: no
+ *   Frecuencia esperada: alta — base de cualquier gráfica de tendencia
+ *                         o detección de estacionalidad (semana 4).
+ *
+ * Consulta C — "Casos por entidad federativa en un rango de fechas"
+ *   Pregunta: ¿cuántos casos confirmados y probables hay por entidad
+ *             federativa en un periodo dado?
+ *   Campos de igualdad: entidad_federativa
+ *   Campos de rango: fecha_inicio_semana
+ *   Ordenamiento: fecha_inicio_semana ascendente
+ *   ¿Consulta arreglo?: no
+ *   Frecuencia esperada: media-alta — apoya reportes estatales agregados.
+ *
+ * Se conservaron estas tres consultas SIN CAMBIOS durante toda la
+ * comparación antes/después de indexar.
+ */
+
+// ============================================================
+// Diseño de índices (regla ESR: Equality, Sort, Range)
+// ============================================================
+/**
+ * idx_semana_casos  (apoya Consulta A)
  *   Patrón: { "semana_epidemiologica.anio": 1, "semana_epidemiologica.semana": 1, "casos_confirmados": -1 }
- *   Igualdad: anio, semana  →  van primero (ESR: Equality)
- *   Orden:    casos_confirmados desc → va al final, coincide con el sort de la consulta
- *   Multikey: no (ningún campo es arreglo)
- *   Costo: cada insert añade una entrada al B-tree; poco impacto porque
- *          es la escritura semanal esperada del sistema, no un hot-path
- *          de escritura masiva continua.
+ *   Igualdad primero (anio, semana), luego el campo de orden
+ *   (casos_confirmados desc) al final, coincidiendo con el sort.
  *
- * Índice 2 — idx_municipio_fecha_anio  (apoya Consulta B)
+ * idx_municipio_fecha_anio  (apoya Consulta B)
  *   Patrón: { clave_municipio: 1, fecha_inicio_semana: 1, "semana_epidemiologica.anio": 1 }
- *   Igualdad: clave_municipio → primero (ESR: Equality)
- *   Orden:    fecha_inicio_semana asc → segundo, coincide con el sort de la consulta
- *   Rango:    semana_epidemiologica.anio → al final (ESR: Range)
- *   Nota: el orden Equality-Sort-Range (no Equality-Range-Sort) es lo que
- *         permite que Mongo entregue los resultados ya ordenados sin una
- *         etapa SORT en memoria, incluso con un filtro de rango encima.
+ *   Igualdad (clave_municipio) → Orden (fecha_inicio_semana, coincide
+ *   con el sort) → Rango (anio) al final. Este orden ESR es lo que
+ *   permite que Mongo entregue resultados ya ordenados sin SORT en
+ *   memoria, incluso con un filtro de rango encima.
  *
- * Índice 3 — idx_entidad_fecha  (apoya Consulta C)
+ * idx_entidad_fecha  (apoya Consulta C)
  *   Patrón: { entidad_federativa: 1, fecha_inicio_semana: 1 }
- *   Igualdad: entidad_federativa → primero
- *   Rango y orden coinciden en el mismo campo (fecha_inicio_semana),
- *   así que va al final y resuelve ambas cosas a la vez.
+ *   Igualdad primero; rango y orden coinciden en el mismo campo
+ *   (fecha_inicio_semana), así que resuelve ambos a la vez.
  *
  * Se proponen solo 3 índices (uno por consulta), no uno por campo:
- * cada uno se deriva de un patrón de consulta real documentado arriba,
- * no de la sola aparición de un campo en un filtro.
+ * cada uno se deriva de un patrón de consulta real documentado
+ * arriba, no de la sola aparición de un campo en un filtro.
  */
 
 function crearIndices(db) {
@@ -54,34 +83,46 @@ function crearIndices(db) {
 //   printjson(db.casos_semanales.getIndexes())
 
 // ============================================================
-// Re-medición — DESPUÉS de indexar (mismas consultas, sin cambios)
+// Re-medición — usar explainConsultaA/B/C de consultas_reales.js
 // ============================================================
-// Reutiliza explainConsultaA/B/C de consultas_y_medicion.js si sigues
-// en la misma sesión de mongosh (load ya las dejó definidas), o pega
-// de nuevo su definición aquí si es una sesión nueva.
-
 /**
- * printjson(explainConsultaA(db))
- * printjson(explainConsultaB(db))
- * printjson(explainConsultaC(db))
- *
- * Verificar en la salida:
- *   - stage principal ahora debe ser IXSCAN (o FETCH sobre IXSCAN),
- *     sin una etapa SORT independiente si el índice cubre el orden
- *   - totalKeysExamined ≈ nReturned (o algo mayor si hay filtro extra)
- *   - totalDocsExamined debería bajar drásticamente frente a 31,203
- *   - nReturned debe ser EXACTAMENTE el mismo que antes de indexar
- *     (203 / 104 / 520) — si cambia, algo en la consulta se alteró
- *     y la comparación ya no es válida
+ *   printjson(explainConsultaA(db, 2026, 25))
+ *   printjson(explainConsultaB(db, "07009", 2026, 2026))
+ *   printjson(explainConsultaC(db, "CHIAPAS", "2026-01-01", "2026-07-01"))
  */
 
-// ============================================================
-// Plantilla de comparación antes/después (llenar con la salida real)
-// ============================================================
-/*
-| Consulta | Plan antes | Plan después | SORT indep. después | totalKeysExamined después | totalDocsExamined después |
-|----------|-----------|--------------|----------------------|-----------------------------|-----------------------------|
-| A        | COLLSCAN  |              |                      |                             |                             |
-| B        | COLLSCAN  |              |                      |                             |                             |
-| C        | COLLSCAN  |              |                      |                             |                             |
-*/
+/**
+ * ============================================================
+ * RESULTADOS REALES — tabla comparativa antes/después
+ * (10,353 documentos reales, DGE/SINAVE 2026, semanas 1-32)
+ * ============================================================
+ *
+ * | Consulta                    | Plan antes       | Plan después              | SORT indep. después | keysExamined | docsExamined | nReturned |
+ * |------------------------------|------------------|----------------------------|----------------------|--------------|--------------|-----------|
+ * | A: top semana 25, 2026       | COLLSCAN→SORT    | IXSCAN (idx_semana_casos)  | No                   | 419          | 419          | 419       |
+ * | B: serie municipio 07009     | COLLSCAN→SORT    | IXSCAN (idx_municipio_...) | No                   | 33           | 32           | 32        |
+ * | C: CHIAPAS, ene–jul 2026     | COLLSCAN→SORT    | IXSCAN (idx_entidad_fecha) | No                   | 527          | 527          | 527       |
+ *
+ * Antes de indexar, totalDocsExamined = 10,353 (colección completa)
+ * en los tres casos, con COLLSCAN seguido de una etapa SORT en
+ * memoria. En los tres casos nReturned se mantuvo idéntico antes y
+ * después de indexar, confirmando que la comparación es válida (el
+ * índice no alteró qué documentos califican).
+ *
+ * Caso más limpio: la consulta A quedó con
+ * keysExamined = docsExamined = nReturned = 419 — cero trabajo
+ * desperdiciado. El índice resolvió el filtro de igualdad y el orden
+ * simultáneamente, sin tocar un documento de más.
+ *
+ * Costo esperado: 3 índices compuestos adicionales sobre 10,353
+ * documentos (y creciendo con cada carga semanal) es razonable para
+ * el volumen del proyecto. Cada insert/actualización semanal escribe
+ * en 3 B-trees adicionales — costo de mantenimiento aceptado a
+ * cambio de eliminar el COLLSCAN en las tres consultas más
+ * frecuentes del sistema.
+ *
+ * Reutilización de prefijo: idx_municipio_fecha_anio (empieza en
+ * clave_municipio) también serviría, sin crear un cuarto índice, para
+ * una consulta futura que solo filtre por clave_municipio sin rango
+ * de fecha.
+ */

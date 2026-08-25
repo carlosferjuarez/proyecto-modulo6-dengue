@@ -17,8 +17,7 @@ function crearIndiceBusquedaMunicipio(db) {
 }
 
 function buscarMunicipioPorPrefijo(db, prefijo) {
-  // Regex anclado (^) para que SÍ pueda usar el índice (un regex sin
-  // ancla al inicio no puede aprovechar un índice B-tree ordinario).
+  // Regex anclado (^) para que SÍ pueda usar el índice.
   return db.casos_semanales.distinct("municipio", {
     municipio: { $regex: "^" + prefijo, $options: "i" }
   });
@@ -44,17 +43,14 @@ function pruebaBusquedaMunicipio(db) {
  * Público:    clave_municipio, municipio, entidad_federativa,
  *             semana_epidemiologica, fecha_inicio_semana, poblacion
  *             (censo INEGI, ya público de origen)
- * Interno:    fuente, fecha_carga (metadatos de trazabilidad,
- *             sin valor sensible pero tampoco necesarios para
- *             consumo público)
+ * Interno:    fuente, fecha_carga (metadatos de trazabilidad)
  * Sensible (condicional): casos_confirmados, casos_probables,
  *             defunciones — CUANDO el municipio tiene población
  *             pequeña. Un conteo bajo (1-2 casos, o cualquier
  *             defunción) en un municipio de unos cientos de
  *             habitantes puede acercarse a identificar a una
- *             persona concreta. En municipios grandes (ej.
- *             Hermosillo, 936k hab.) el mismo dato es
- *             estadísticamente anónimo. La sensibilidad depende
+ *             persona concreta. En municipios grandes el mismo dato
+ *             es estadísticamente anónimo. La sensibilidad depende
  *             del tamaño de población, no solo del campo.
  */
 
@@ -62,13 +58,9 @@ function pruebaBusquedaMunicipio(db) {
 // ------------------------------------------------------------
 // 3. MINIMIZACIÓN: generalización de celdas pequeñas
 // ------------------------------------------------------------
-// Para cualquier rol que NO necesite el conteo exacto (ej. un
-// dashboard público o una brigada sin necesidad de precisión),
-// se generaliza a un rango cuando la población es pequeña y el
-// conteo es bajo, en vez de exponer el número exacto.
 
-const UMBRAL_POBLACION_PEQUENA = 5000;   // municipios pequeños
-const UMBRAL_CONTEO_SENSIBLE = 3;        // conteos bajos a generalizar
+const UMBRAL_POBLACION_PEQUENA = 5000;
+const UMBRAL_CONTEO_SENSIBLE = 3;
 
 function crearVistaGeneralizada(db) {
   db.createView("casos_semanales_publico", "casos_semanales", [
@@ -89,7 +81,7 @@ function crearVistaGeneralizada(db) {
                 { $lt: ["$casos_confirmados", UMBRAL_CONTEO_SENSIBLE] }
               ]
             },
-            "menos de 3",  // generalizado, no el número exacto
+            "menos de 3",
             "$casos_confirmados"
           ]
         },
@@ -105,10 +97,6 @@ function crearVistaGeneralizada(db) {
             "$casos_probables"
           ]
         },
-        // defunciones: la más sensible de las tres -> se generaliza
-        // a presencia/ausencia en municipios pequeños, nunca el
-        // conteo exacto (1 defunción en un pueblo de 365 habitantes
-        // es prácticamente un identificador).
         defunciones: {
           $cond: [
             { $lt: ["$poblacion", UMBRAL_POBLACION_PEQUENA] },
@@ -121,10 +109,6 @@ function crearVistaGeneralizada(db) {
   ]);
 }
 // Uso: crearVistaGeneralizada(db)
-//      db.casos_semanales_publico.findOne({ municipio: "SAN JAVIER" })
-//      -> debe mostrar defunciones como "reportada(s)" o "0", no el
-//         número exacto; casos_semanales_publico.findOne({municipio:"HERMOSILLO"})
-//         -> debe mostrar los números exactos (población grande)
 
 
 // ------------------------------------------------------------
@@ -141,11 +125,6 @@ function crearVistaGeneralizada(db) {
  */
 
 function crearRoles(db) {
-  // brigada_campo: solo la vista generalizada, y solo su propia entidad
-  // (el filtro por entidad se aplicaría a nivel de aplicación o con un
-  // usuario por entidad + una vista parametrizada; aquí se muestra el
-  // rol base sin el filtro por entidad, que requiere una vista por
-  // entidad o lógica en la capa de aplicación).
   db.createRole({
     role: "brigada_campo",
     privileges: [
@@ -196,14 +175,53 @@ function crearRoles(db) {
 }
 // Uso: crearRoles(db)
 //      printjson(db.getRoles({ showPrivileges: true }))
-//
-// Creación de usuarios (NUNCA con contraseña en texto plano en un
-// script versionado -- esto es solo ejemplo de sintaxis, la
-// contraseña real se pasa por variable de entorno o gestor de
-// secretos, nunca hardcodeada ni committeada):
+
+// Creación de usuario de prueba (contraseña NUNCA en texto plano en
+// el script; se ingresa de forma interactiva):
 //
 //   db.createUser({
-//     user: "brigada_sonora",
-//     pwd: passwordPrompt(),  // mongosh pide la contraseña interactivamente
+//     user: "test_brigada",
+//     pwd: passwordPrompt(),
 //     roles: [{ role: "brigada_campo", db: db.getName() }]
 //   })
+
+/**
+ * ============================================================
+ * RESULTADOS REALES (evidencia comprobada, no solo diseño)
+ * ============================================================
+ *
+ * Vista generalizada — comparación real:
+ *   casos_semanales_publico.findOne({municipio:"SAN JAVIER"})
+ *     -> casos_confirmados: "menos de 3", casos_probables: "menos de 3",
+ *        defunciones: "0"   (población 537, bajo el umbral)
+ *   casos_semanales.findOne({municipio:"AGUASCALIENTES"}) [vía la vista]
+ *     -> casos_confirmados: 0 (número exacto, sin generalizar —
+ *        población 948,990, sobre el umbral)
+ *   Confirma que la regla discrimina por tamaño de población, no se
+ *   aplica ciegamente a cualquier conteo bajo.
+ *
+ * Matriz de roles — probada con un usuario real (test_brigada,
+ * rol brigada_campo), en una sesión de mongosh aparte (no como
+ * admin/root):
+ *   db.casos_semanales_publico.findOne()
+ *     -> PERMITIDO
+ *   db.casos_semanales.findOne()
+ *     -> MongoServerError[Unauthorized]: not authorized on
+ *        proyecto_modulo6 to execute command { find: "casos_semanales", ... }
+ *   db.casos_semanales.insertOne({ prueba: 1 })
+ *     -> MongoServerError[Unauthorized]: not authorized on
+ *        proyecto_modulo6 to execute command { insert: "casos_semanales", ... }
+ *   Esto distingue explícitamente un rol DISEÑADO de una denegación
+ *   REALMENTE COMPROBADA, como exige la guía.
+ *
+ * Credenciales y cifrado (entorno: MongoDB 7.0.37 en Docker local,
+ * 127.0.0.1):
+ *   db.runCommand({ connectionStatus: 1 })
+ *     -> authenticatedUsers: admin (db: admin), rol: root
+ *   db.serverStatus().transportSecurity
+ *     -> { '1.0': 0, '1.1': 0, '1.2': 0, '1.3': 0, unknown: 0 }
+ *   TLS deshabilitado. Aceptado como decisión válida para desarrollo
+ *   local (tráfico que nunca sale de localhost); se documenta como
+ *   limitación con recomendación explícita de habilitar TLS en
+ *   cualquier despliegue donde el tráfico cruce una red.
+ */

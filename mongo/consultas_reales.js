@@ -1,7 +1,9 @@
 /**
- * Paso 1: descubrir parámetros reales antes de medir.
- * Corran esto primero en mongosh para saber qué valores existen.
+ * Descubrimiento de parámetros reales antes de medir, y las tres
+ * funciones explain() parametrizadas, listas para usarse contra
+ * cualquier corte de datos (no solo el usado durante el desarrollo).
  */
+
 function descubrirParametros(db) {
   print("=== Años/semanas disponibles ===");
   printjson(db.casos_semanales.aggregate([
@@ -32,11 +34,6 @@ function descubrirParametros(db) {
   ]).toArray());
 }
 
-/**
- * Paso 2: las mismas tres consultas de antes, ahora parametrizadas.
- * Llenen anio/semana/clave/entidad con valores reales del paso 1.
- */
-
 // --- Consulta A: top municipios por semana ---
 function explainConsultaA(db, anio, semana) {
   return db.casos_semanales.find({
@@ -62,9 +59,23 @@ function explainConsultaC(db, entidad, fechaInicio, fechaFin) {
 }
 
 /**
- * Ejemplo de uso una vez que tengan los valores reales del paso 1:
+ * ============================================================
+ * PARÁMETROS REALES usados en la medición documentada del proyecto
+ * (dataset DGE/SINAVE 2026, semanas 1-32, 10,353 documentos)
+ * ============================================================
  *
- *   printjson(explainConsultaA(db, 2026, 20))
- *   printjson(explainConsultaB(db, "12050", 2026, 2026))
- *   printjson(explainConsultaC(db, "GUERRERO", "2026-01-01", "2026-07-01"))
+ *   printjson(explainConsultaA(db, 2026, 25))
+ *   printjson(explainConsultaB(db, "07009", 2026, 2026))
+ *   printjson(explainConsultaC(db, "CHIAPAS", "2026-01-01", "2026-07-01"))
+ *
+ * Se eligió la semana 25 por tener el mayor volumen de documentos
+ * (419) entre las candidatas exploradas con descubrirParametros(db).
+ * Se eligió el municipio 07009 (Chiapas) por ser uno de los estados
+ * de mayor incidencia histórica de dengue en México. Nota: el
+ * catálogo real usa nombres oficiales completos en mayúsculas
+ * (ej. "VERACRUZ DE IGNACIO DE LA LLAVE", no "Veracruz").
+ *
+ * Resultados obtenidos con estos parámetros, antes/después de crear
+ * los índices de indices_semana2.js: ver la tabla comparativa al
+ * final de ese archivo.
  */

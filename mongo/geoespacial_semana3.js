@@ -2,9 +2,19 @@
  * ============================================================
  * Semana 3 — Componente geoespacial
  * ============================================================
+ *
+ * Tabla de decisión (§3.2 de la guía):
+ *
+ * | Pregunta                                                        | Entidad y geometría        | Relación espacial | Decisión                                                                 |
+ * |------------------------------------------------------------------|-----------------------------|--------------------|---------------------------------------------------------------------------|
+ * | ¿Qué municipios cercanos a un municipio con brote también       | Municipio (centroide, Point)| Proximidad         | Integrar — cambia qué municipios se consideran en riesgo de contagio     |
+ * | muestran incidencia elevada en la misma semana?                  |                             |                    | regional, no solo cuáles tienen más casos aislados                       |
+ * | ¿Cuántos casos hay dentro de un radio de un punto de referencia? | Municipio (centroide, Point)| Proximidad (radio) | Integrar — apoya despliegue operativo de brigadas de control vectorial   |
+ * | ¿Los casos coinciden con una región poligonal (ej. franja        | Requeriría polígonos, no   | Pertenencia        | Posponer — solo se cuenta con centroides puntuales, no con polígonos     |
+ * | costera, área metropolitana)?                                    | solo centroides            | ($geoWithin)       | de región en el dataset actual                                           |
  */
 
-// --- §3.5: crear y verificar el índice geoespacial ---
+// --- Índice geoespacial ---
 function crearIndiceGeoespacial(db) {
   db.casos_semanales.createIndex(
     { geometry: "2dsphere" },
@@ -14,23 +24,23 @@ function crearIndiceGeoespacial(db) {
 // Ejecutar y confirmar:
 //   crearIndiceGeoespacial(db)
 //   printjson(db.casos_semanales.getIndexes())
-//   db.casos_semanales.countDocuments({ geometry: { $exists: true } })
 
 
-// --- Paso previo: encontrar un hotspot real para usar como referencia ---
+// --- Encontrar el hotspot real de una semana dada (sin asumir cuál es) ---
 function encontrarHotspot(db, anio, semana) {
   return db.casos_semanales.find({
     "semana_epidemiologica.anio": anio,
     "semana_epidemiologica.semana": semana
   }).sort({ casos_confirmados: -1 }).limit(1).toArray()[0];
 }
-// Uso: const hotspot = encontrarHotspot(db, 2026, 25)
+// Uso: const hotspot = encontrarHotspot(db, <anio>, <semana>)
 //      printjson(hotspot)
+// El hotspot se calcula dinámicamente a partir de los datos cargados;
+// no se hardcodea ningún municipio específico en esta función, para
+// que el script siga siendo válido si el dataset se actualiza.
 
 
-// --- §3.6: consulta espacial simple con $near ---
-// Municipios ordenados por cercanía a un punto de referencia, dentro de
-// un radio máximo (en metros).
+// --- Consulta espacial simple con $near ---
 function municipiosCercanos(db, lon, lat, radioMetros) {
   return db.casos_semanales.find({
     geometry: {
@@ -41,13 +51,11 @@ function municipiosCercanos(db, lon, lat, radioMetros) {
     }
   }).toArray();
 }
-// Uso: printjson(municipiosCercanos(db, -92.45, 16.75, 100000))  // 100 km
+// Uso: const [lon, lat] = hotspot.geometry.coordinates
+//      printjson(municipiosCercanos(db, lon, lat, 150000))  // 150 km
 
 
-// --- §3.7: integrar selección espacial con análisis temático ---
-// Pipeline: $geoNear (debe ir primero) + filtro de semana + proyección
-// de distancia + casos, para responder "¿qué municipios cercanos al
-// hotspot también tienen incidencia elevada esa semana?"
+// --- Integrar selección espacial con análisis temático ($geoNear primero) ---
 function brotesRegionalesCercanos(db, lon, lat, radioMetros, anio, semana, minCasos) {
   return db.casos_semanales.aggregate([
     {
@@ -77,25 +85,59 @@ function brotesRegionalesCercanos(db, lon, lat, radioMetros, anio, semana, minCa
     { $sort: { casos_confirmados: -1 } }
   ]).toArray();
 }
-// Uso, con el hotspot ya encontrado:
-//   const hotspot = encontrarHotspot(db, 2026, 25)
-//   const [lon, lat] = hotspot.geometry.coordinates
-//   printjson(brotesRegionalesCercanos(db, lon, lat, 150000, 2026, 25, 5))
-//   // municipios dentro de 150km del hotspot, misma semana, con >=5 casos confirmados
+// Uso: printjson(brotesRegionalesCercanos(db, lon, lat, 150000, <anio>, <semana>, 3))
 
 /**
  * ============================================================
- * §3.8 — Casos de control sugeridos
+ * §3.8 — Casos de control (verificados con datos reales)
  * ============================================================
- * 1. El propio hotspot: debe aparecer en el resultado con distancia ~0.
- * 2. Un municipio del mismo estado, cercano: debe aparecer si supera
- *    minCasos.
- * 3. Un municipio en la otra punta del país (ej. Baja California si el
- *    hotspot es Chiapas): NO debe aparecer — confirma que $maxDistance
- *    realmente está acotando.
- * 4. Un municipio cercano pero con pocos casos esa semana: debe
- *    aparecer en municipiosCercanos() (sin filtro de casos) pero NO en
- *    brotesRegionalesCercanos() si no alcanza minCasos — confirma que
- *    el filtro temático se aplicó después de la selección espacial,
- *    como pide la guía.
+ * Ejecución real documentada del proyecto:
+ *
+ *   const hotspot = encontrarHotspot(db, 2026, 25)
+ *   // -> Hermosillo, Sonora (clave_municipio "26030"),
+ *   //    coordinates: [-110.5730469, 29.042961],
+ *   //    casos_confirmados: 16 (el mayor de esa semana)
+ *
+ *   const [lon, lat] = hotspot.geometry.coordinates
+ *   printjson(municipiosCercanos(db, lon, lat, 150000))
+ *   printjson(brotesRegionalesCercanos(db, lon, lat, 150000, 2026, 25, 3))
+ *
+ * RESULTADOS:
+ *
+ * 1. municipiosCercanos(db, -110.5730469, 29.042961, 150000) devolvió
+ *    30 municipios, TODOS de Sonora (San Miguel de Horcasitas, Ures,
+ *    Magdalena, Arizpe, Carbó, Soyopa, San Javier, Onavas, entre
+ *    otros) — ninguno de otro estado. Confirma que el índice
+ *    2dsphere y las coordenadas están bien construidos.
+ *
+ * 2. brotesRegionalesCercanos(db, -110.5730469, 29.042961, 150000,
+ *    2026, 25, 3) devolvió un único resultado:
+ *      { municipio: "HERMOSILLO", entidad_federativa: "SONORA",
+ *        casos_confirmados: 16, distancia_km: 0 }
+ *    Ningún municipio vecino alcanzó el umbral de 3 casos
+ *    confirmados esa semana — sin señal de propagación regional
+ *    visible en la semana 25 de 2026.
+ *
+ * 3. Caso de control #4 (filtro temático aplicado después de la
+ *    selección espacial): San Miguel de Horcasitas, Sonora
+ *    (clave "26056"), semana 25, con casos_confirmados: 0 —
+ *    apareció en municipiosCercanos() pero NO en
+ *    brotesRegionalesCercanos(). Confirma el orden correcto de
+ *    operaciones en el pipeline.
+ *
+ * 4. Caso de control #3 (¿$maxDistance acota de verdad?): se probó
+ *    con Tapachula, Chiapas (clave_municipio "07089",
+ *    coordinates: [-92.1551552, 14.5439857], casos_confirmados: 2
+ *    esa misma semana), a ~2,000 km de Hermosillo. NO apareció en
+ *    ninguno de los dos resultados anteriores — confirma que
+ *    $maxDistance realmente acota la búsqueda.
+ *
+ * LIMITACIÓN DOCUMENTADA: la comparación usa conteos absolutos de
+ * casos confirmados, no tasas de incidencia por población. Hermosillo
+ * (936,263 hab.) y San Javier (537 hab.) no son comparables con el
+ * mismo umbral de "casos confirmados" — un municipio pequeño con 1-2
+ * casos puede tener una incidencia por 100,000 habitantes mayor que
+ * Hermosillo con 16. Un conteo no es una tasa si no existe un
+ * denominador de exposición (población) en el cálculo — aquí no se
+ * incluyó, y es una mejora pendiente señalada explícitamente.
  */
