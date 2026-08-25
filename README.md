@@ -1,4 +1,4 @@
-# Vigilancia Epidemiológica de Dengue en México con MongoDB
+# Vigilancia Epidemiológica de Dengue en México
 
 Proyecto final — Diplomado Manejo de Bases de Datos SQL y NoSQL en un
 Entorno de Nube, Módulo 6 (Conceptos Avanzados de Bases de Datos NoSQL).
