@@ -12,8 +12,7 @@ import sys
 import pandas as pd
 
 def explorar(path):
-    # Probar utf-8 primero (recomendado por el propio repo DengueMX),
-    # si falla caer a latin-1 (común en exports de gobierno mexicano)
+    
     try:
         df = pd.read_csv(path, encoding="utf-8", low_memory=False, nrows=50000)
     except UnicodeDecodeError:
@@ -31,8 +30,6 @@ def explorar(path):
     print("\n=== Nulos por columna (top 15) ===")
     print(df.isnull().sum().sort_values(ascending=False).head(15))
 
-    # Pistas específicas para nuestro esquema: ¿hay algo parecido a
-    # municipio, entidad, fecha, semana, clave?
     print("\n=== Columnas candidatas para el mapeo a nuestro esquema ===")
     pistas = ["municip", "entidad", "fecha", "semana", "clave", "edad",
               "sexo", "sintoma", "confirm", "probable", "defunc", "resultado"]
