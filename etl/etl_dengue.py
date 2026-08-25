@@ -3,13 +3,6 @@ ETL: dengue_abierto.csv (crudo, por caso individual, DGE)
      -> casos_semanales.json (agregado por municipio + semana epidemiológica,
         listo para insertar en MongoDB con nuestro esquema)
 
-ANTES DE CORRER EN SERIO: abre Catalogos_Dengue.xlsx (del diccionario que
-bajaste) y confirma los tres mapeos marcados con "# VERIFICAR" abajo. Los
-valores que puse son mi mejor suposición basada en la convención que usa
-la DGE en otros datasets abiertos (ej. COVID-19: 1=Sí, 2=No, 97/98/99=
-no aplica/se ignora/no especificado) — NO están confirmados para este
-dataset de dengue específicamente.
-
 Uso:
     python etl_dengue.py dengue_abierto.csv casos_semanales.json
 """
@@ -23,13 +16,13 @@ from epiweeks import Week
 # Mapeos de catálogo — VERIFICAR contra Catalogos_Dengue.xlsx
 # ============================================================
 
-# Confirmado contra Catalogos_Dengue.xlsx, tab "CATÁLOGO ESTATUS_CASO":
+# Catalogos_Dengue.xlsx, tab "CATÁLOGO ESTATUS_CASO":
 #   1 = PROBABLE, 2 = CONFIRMADO, 3 = DESCARTADO
 ESTATUS_PROBABLE = {1}
 ESTATUS_CONFIRMADO = {2}
 # 3 = Descartado -> no cuenta como caso (ni confirmado ni probable)
 
-# Confirmado contra Catalogos_Dengue.xlsx, tab "CATÁLOGO SI_NO"
+# Catalogos_Dengue.xlsx, tab "CATÁLOGO SI_NO"
 # (compartido por DEFUNCION, DIABETES, HIPERTENSION, EMBARAZO, etc.):
 #   1 = SI, 2 = NO  (solo estos dos códigos, sin "no aplica"/"se ignora")
 DEFUNCION_SI = {1}
@@ -38,7 +31,7 @@ DEFUNCION_NO = {2}
 # Código usado por la DGE para "no especificado" en MUNICIPIO_RES
 MUNICIPIO_NO_ESPECIFICADO = {999}
 
-# Códigos de ENTIDAD_RES que NO son estados mexicanos, confirmados contra
+# Códigos de ENTIDAD_RES que NO son estados mexicanos
 # Catalogos_Dengue.xlsx tab "CATÁLOGO ENTIDAD":
 #   33 = EUA, 34 = Otros países Latam, 35 = Otros países,
 #   97 = No aplica, 98 = Se ignora, 99 = No especificado
