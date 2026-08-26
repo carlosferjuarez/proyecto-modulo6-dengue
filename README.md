@@ -13,7 +13,7 @@ elevada, detectar posibles señales de propagación regional y
 caracterizar la evolución temporal de la enfermedad, a partir de datos
 abiertos oficiales.
 
-Reporte completo: [`docs/reporte_dengue_mongodb.pdf`](docs/reporte_dengue_mongodb.pdf)
+Reporte completo: [`docs/Carlos_Juarez_Pacheco_proyecto_nosql.pdf`](docs/Carlos_Juarez_Pacheco_proyecto_nosql.pdf)
 Guía de reproducción paso a paso: [`docs/orden_ejecucion.md`](docs/orden_ejecucion.md)
 
 ## Datos
